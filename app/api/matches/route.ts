@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { analyzeMatch } from "@/lib/analysis";
+import { analyzeMatch } from "../../../lib/analysis";
 
 const API_URL = "https://v3.football.api-sports.io";
 
@@ -56,8 +56,6 @@ export async function GET(request: Request) {
   const requestedDate = searchParams.get("date");
   const date = requestedDate ?? new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Istanbul" }).format(new Date());
 
-  // Free API-Football has a 10 requests/minute limit. One fixture list +
-  // 2 history calls per match means 4 matches keeps a single refresh below it.
   const limit = Math.min(Number(searchParams.get("limit") ?? 4), 4);
 
   if (!process.env.API_FOOTBALL_KEY) {
