@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CalendarDays, Clock3, CircleHelp, Gauge, Goal, Search, ShieldCheck, Sparkles, Trophy, Zap } from "lucide-react";
+import LiveMatches from "./components/LiveMatches";
 
 type Match = { id?: number; league: string; country?: string; date?: string; time: string; home: string; away: string; homeForm: string; awayForm: string; goal: number; over15: number; over25: number; btts: number; confidence: "Yüksek" | "Orta" | "Düşük"; expectedGoals?: number; explanation?: string };
 
@@ -43,9 +44,9 @@ export default function Home() {
         const liveMatches = Array.isArray(data.matches) ? data.matches.map((match: Partial<Match>) => ({ ...match, homeForm: match.homeForm ?? "—", awayForm: match.awayForm ?? "—" })) as Match[] : [];
         setMatches(liveMatches);
         setSelected(liveMatches[0] ?? null);
-        setSource(liveMatches.length ? (data.source === "sportmonks" ? "Sportmonks canlı veri" : "API-Football canlı veri") : isWeek ? "Bu hafta için gerçek maç verisi bulunamadı" : "Bugün için gerçek maç verisi bulunamadı");
+        setSource(liveMatches.length ? (data.source === "sportmonks" ? "Sportmonks gerçek veri" : "API-Football gerçek veri") : isWeek ? "Bu hafta için gerçek maç verisi bulunamadı" : "Bugün için gerçek maç verisi bulunamadı");
       })
-      .catch(() => setSource("Canlı veri bağlantısı kurulamadı"))
+      .catch(() => setSource("Gerçek veri bağlantısı kurulamadı"))
       .finally(() => setLoading(false));
     return () => { cancelled = true; };
   }, [isWeek]);
@@ -68,7 +69,6 @@ export default function Home() {
     return [...groups.entries()];
   }, [filtered, isWeek]);
 
-  const showingToday = active === "Bugünün Maçları" || active === "Genel Bakış" || active === "Gol Sinyalleri" || active === "Ligler";
   const title = isWeek ? "Haftanın Maçları" : active;
 
   return <main className="shell">
@@ -76,13 +76,16 @@ export default function Home() {
       <div className="brand"><div className="brand-mark">M</div><div><strong>Maç AI</strong><span>Football Intelligence</span></div></div>
       <div className="nav-label">MENÜ</div>
       <nav>{navItems.map((item, i) => { const Icon = [Gauge, Goal, CalendarDays, CalendarDays, Trophy][i]; return <button key={item} className={active === item ? "nav active" : "nav"} onClick={() => setActive(item)}><span><Icon size={18} /></span>{item}</button>; })}</nav>
-      <div className="sidebar-card"><Sparkles size={18}/><div><b>Maç AI Motoru</b><p>Gerçek fixture, tarih, saat, lig ve gol verileriyle analiz hazırlanıyor.</p></div></div>
+      <div className="sidebar-card"><Sparkles size={18}/><div><b>Maç AI Motoru</b><p>Gerçek fixture, canlı skor, istatistik ve gol sinyalleriyle analiz hazırlanıyor.</p></div></div>
       <div className="sidebar-footer"><ShieldCheck size={15}/> İstatistiksel analiz • Garanti değildir</div>
     </aside>
 
     <section className="content">
       <header className="topbar"><div><div className="eyebrow">MAÇ AI • {isWeek ? "HAFTA" : "BUGÜN"}</div><h1>{title}</h1></div><div className="search"><Search size={17}/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Maç veya takım ara..." /></div></header>
       <section className="range-tabs"><button className={!isWeek ? "active" : ""} onClick={() => setActive("Bugünün Maçları")}>📅 Bugün</button><button className={isWeek ? "active" : ""} onClick={() => setActive("Haftanın Maçları")}>🗓️ Haftanın Maçları</button></section>
+
+      <LiveMatches />
+
       <section className="hero"><div><div className="hero-kicker"><Zap size={16}/> {isWeek ? "HAFTANIN GOL SİNYALLERİ" : "BUGÜNÜN GOL SİNYALLERİ"}</div><h2>{isWeek ? "Bu haftanın maçlarını incele." : "Bugün oynanacak maçları göster."}<br/>Önce en güçlü 10 maç.</h2><p>{isWeek ? "Bugünden başlayarak sonraki 6 günün gerçek fikstürleri gösterilir." : "Bu bölüm yalnızca bugün oynanacak gerçek maçları gösterir."} Maç AI, maçları gol olasılığına göre sıralar ve ligleri ayrı bölümde sunar.</p></div><div className="hero-stat"><span>En yüksek gol olasılığı</span><strong>{top10[0]?.goal ?? 0}%</strong><small>{loading ? "Veriler yükleniyor…" : source}</small></div></section>
 
       <section className="match-section">
