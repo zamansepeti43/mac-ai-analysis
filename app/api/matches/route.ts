@@ -3,7 +3,7 @@ import { analyzeMatch } from "@/lib/analysis";
 
 const API_URL = "https://v3.football.api-sports.io";
 
-type ApiResponse<T> = { response?: T[]; errors?: Record<string, string> };
+type ApiResponse<T> = { response?: T[] };
 
 type Fixture = {
   fixture: { id: number; date: string; status: { short: string } };
@@ -55,9 +55,10 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const requestedDate = searchParams.get("date");
   const date = requestedDate ?? new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Istanbul" }).format(new Date());
-  const limit = Math.min(Number(searchParams.get("limit") ?? 8), 12);
 
-  const fixtures = await apiFootball<Fixture>(`/fixtures?date=${date}&timezone=Europe%2FIstanbul`);
+  // Free API-Football has a 10 requests/minute limit. One fixture list +
+  // 2 history calls per match means 4 matches keeps a single refresh below it.
+  const limit = Math.min(Number(searchParams.get("limit") ?? 4), 4);
 
   if (!process.env.API_FOOTBALL_KEY) {
     return NextResponse.json({
@@ -67,6 +68,7 @@ export async function GET(request: Request) {
     });
   }
 
+  const fixtures = await apiFootball<Fixture>(`/fixtures?date=${date}&timezone=Europe%2FIstanbul`);
   const upcoming = fixtures
     .filter((item) => ["NS", "TBD"].includes(item.fixture.status.short))
     .slice(0, limit);
