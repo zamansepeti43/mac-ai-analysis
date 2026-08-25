@@ -1,11 +1,34 @@
 import { NextResponse } from "next/server";
 import { analyzeMatch } from "../../../lib/analysis";
 
-const API_URL = "https://v3.football.api-sports.io";
+const SPORTMONKS_URL = "https://api.sportmonks.com/v3/football";
+const API_FOOTBALL_URL = "https://v3.football.api-sports.io";
 
+type SportmonksParticipant = {
+  id: number;
+  name: string;
+  meta?: { location?: "home" | "away" };
+};
+
+type SportmonksExpected = {
+  location?: "home" | "away";
+  data?: { value?: number };
+};
+
+type SportmonksFixture = {
+  id: number;
+  name?: string;
+  starting_at: string;
+  state_id?: number;
+  participants?: SportmonksParticipant[];
+  xGFixture?: SportmonksExpected[];
+  xgfixture?: SportmonksExpected[];
+};
+
+type SportmonksResponse<T> = { data?: T[] };
 type ApiResponse<T> = { response?: T[] };
 
-type Fixture = {
+type ApiFootballFixture = {
   fixture: { id: number; date: string; status: { short: string } };
   league: { name: string; country: string };
   teams: {
@@ -19,11 +42,36 @@ type HistoryFixture = {
   goals: { home: number | null; away: number | null };
 };
 
+function emptyAnalysis() {
+  return {
+    goalProbability: 50,
+    over15: 50,
+    over25: 50,
+    bothTeamsScore: 50,
+    expectedGoals: 1.5,
+    confidence: "Düşük",
+  };
+}
+
+async function sportmonks<T>(path: string): Promise<T[]> {
+  const token = process.env.SPORTMONKS_API_TOKEN;
+  if (!token) return [];
+
+  const response = await fetch(`${SPORTMONKS_URL}${path}`, {
+    headers: { Authorization: token },
+    next: { revalidate: 900 },
+  });
+
+  if (!response.ok) return [];
+  const json = (await response.json()) as SportmonksResponse<T>;
+  return json.data ?? [];
+}
+
 async function apiFootball<T>(path: string): Promise<T[]> {
   const key = process.env.API_FOOTBALL_KEY;
   if (!key) return [];
 
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(`${API_FOOTBALL_URL}${path}`, {
     headers: { "x-apisports-key": key },
     next: { revalidate: 900 },
   });
@@ -31,6 +79,20 @@ async function apiFootball<T>(path: string): Promise<T[]> {
   if (!response.ok) return [];
   const json = (await response.json()) as ApiResponse<T>;
   return json.response ?? [];
+}
+
+function participants(fixture: SportmonksFixture) {
+  const list = fixture.participants ?? [];
+  const home = list.find((item) => item.meta?.location === "home") ?? list[0];
+  const away = list.find((item) => item.meta?.location === "away") ?? list[1];
+  return { home, away };
+}
+
+function xgValues(fixture: SportmonksFixture) {
+  const expected = fixture.xGFixture ?? fixture.xgfixture ?? [];
+  const home = expected.find((item) => item.location === "home")?.data?.value;
+  const away = expected.find((item) => item.location === "away")?.data?.value;
+  return { home, away };
 }
 
 function historyStats(fixtures: HistoryFixture[], teamId: number) {
@@ -51,22 +113,60 @@ function historyStats(fixtures: HistoryFixture[], teamId: number) {
   return { goalsFor, goalsAgainst, games };
 }
 
+async function getSportmonksMatches(date: string, limit: number) {
+  const fixtures = await sportmonks<SportmonksFixture>(
+    `/fixtures/date/${date}?include=participants;xGFixture&per_page=50`
+  );
+
+  return fixtures
+    .filter((fixture) => fixture.starting_at >= `${date}T00:00:00`)
+    .slice(0, limit)
+    .map((fixture) => {
+      const { home, away } = participants(fixture);
+      const xg = xgValues(fixture);
+      return {
+        id: fixture.id,
+        league: "Sportmonks",
+        country: "",
+        time: new Intl.DateTimeFormat("tr-TR", {
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: "Europe/Istanbul",
+        }).format(new Date(fixture.starting_at)),
+        home: home?.name ?? "Ev sahibi",
+        away: away?.name ?? "Deplasman",
+        xgHome: xg.home ?? null,
+        xgAway: xg.away ?? null,
+        ...emptyAnalysis(),
+      };
+    });
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const requestedDate = searchParams.get("date");
   const date = requestedDate ?? new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Istanbul" }).format(new Date());
+  const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? 8), 1), 8);
 
-  const limit = Math.min(Number(searchParams.get("limit") ?? 4), 4);
+  if (process.env.SPORTMONKS_API_TOKEN) {
+    const matches = await getSportmonksMatches(date, limit);
+    return NextResponse.json({
+      source: "sportmonks",
+      date,
+      matches,
+      note: "xGFixture maç sonrası xG verisidir; pre-match olasılıkları ayrı model hesaplayacaktır.",
+    });
+  }
 
   if (!process.env.API_FOOTBALL_KEY) {
     return NextResponse.json({
       source: "demo",
-      message: "API_FOOTBALL_KEY tanımlı değil. Arayüz demo verisiyle çalışıyor.",
+      message: "SPORTMONKS_API_TOKEN tanımlı değil. Arayüz demo verisiyle çalışıyor.",
       matches: [],
     });
   }
 
-  const fixtures = await apiFootball<Fixture>(`/fixtures?date=${date}&timezone=Europe%2FIstanbul`);
+  const fixtures = await apiFootball<ApiFootballFixture>(`/fixtures?date=${date}&timezone=Europe%2FIstanbul`);
   const upcoming = fixtures
     .filter((item) => ["NS", "TBD"].includes(item.fixture.status.short))
     .slice(0, limit);
