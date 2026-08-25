@@ -18,6 +18,22 @@ const ESPN_LEAGUES = [
   ["por.1", "Portekiz", "Primeira Liga"],
   ["sco.1", "İskoçya", "Premiership"],
   ["usa.1", "ABD", "MLS"],
+  ["bel.1", "Belçika", "Pro League"],
+  ["aut.1", "Avusturya", "Bundesliga"],
+  ["sui.1", "İsviçre", "Super League"],
+  ["gre.1", "Yunanistan", "Super League"],
+  ["den.1", "Danimarka", "Superliga"],
+  ["nor.1", "Norveç", "Eliteserien"],
+  ["swe.1", "İsveç", "Allsvenskan"],
+  ["bra.1", "Brezilya", "Serie A"],
+  ["arg.1", "Arjantin", "Liga Profesional"],
+  ["mex.1", "Meksika", "Liga MX"],
+  ["jpn.1", "Japonya", "J1 League"],
+  ["kor.1", "Güney Kore", "K League 1"],
+  ["aus.1", "Avustralya", "A-League"],
+  ["uefa.champions", "Avrupa", "UEFA Şampiyonlar Ligi"],
+  ["uefa.europa", "Avrupa", "UEFA Avrupa Ligi"],
+  ["uefa.europa.conf", "Avrupa", "UEFA Konferans Ligi"],
 ] as const;
 
 type SportmonksParticipant = { id: number; name: string; meta?: { location?: "home" | "away" } };
@@ -28,7 +44,7 @@ type SportmonksResponse<T> = { data?: T[]; message?: string; error?: string };
 type ApiResponse<T> = { response?: T[]; errors?: Record<string, unknown> };
 type ApiFootballFixture = { fixture: { id: number; date: string; status: { short: string } }; league: { name: string; country: string }; teams: { home: { id: number; name: string }; away: { id: number; name: string } } };
 type HistoryFixture = { teams: { home: { id: number }; away: { id: number } }; goals: { home: number | null; away: number | null } };
-type EspnEvent = { id: string; date: string; name?: string; competitions?: Array<{ competitors?: Array<{ id?: string; homeAway?: "home" | "away"; team?: { displayName?: string; name?: string } }>; status?: { type?: { state?: string; shortDetail?: string } } }> };
+type EspnEvent = { id: string; date: string; name?: string; competitions?: Array<{ competitors?: Array<{ id?: string; homeAway?: "home" | "away"; team?: { displayName?: string; name?: string } }>; status?: { type?: { state?: string; shortDetail?: string } }> }> };
 type EspnResponse = { events?: EspnEvent[] };
 
 async function sportmonksRequest<T>(path: string, withXg: boolean): Promise<{ data: T[]; error?: string }> {
@@ -50,7 +66,10 @@ async function apiFootball<T>(path: string): Promise<{ data: T[]; error?: string
 }
 async function espnScoreboard(league: string, date: string): Promise<{ data: EspnEvent[]; error?: string }> {
   try {
-    const response = await fetch(`${ESPN_URL}/${league}/scoreboard?dates=${date}`, { next: { revalidate: 30 } });
+    // ESPN dates parametresi YYYYMMDD bekler. Buraya YYYY-MM-DD gönderilmesi
+    // fallback katmanının sürekli boş dönmesine neden oluyordu.
+    const espnDate = date.replaceAll("-", "");
+    const response = await fetch(`${ESPN_URL}/${league}/scoreboard?dates=${espnDate}`, { next: { revalidate: 30 } });
     if (!response.ok) return { data: [], error: `ESPN ${response.status}` };
     const json = (await response.json().catch(() => ({}))) as EspnResponse;
     return { data: json.events ?? [] };
