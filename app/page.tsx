@@ -5,13 +5,6 @@ import { CalendarDays, Clock3, CircleHelp, Gauge, Goal, Search, ShieldCheck, Spa
 
 type Match = { id?: number; league: string; country?: string; date?: string; time: string; home: string; away: string; homeForm: string; awayForm: string; goal: number; over15: number; over25: number; btts: number; confidence: "Yüksek" | "Orta" | "Düşük"; expectedGoals?: number; explanation?: string };
 
-const demoMatches: Match[] = [
-  { league: "Premier League", date: "2026-08-25", time: "20:00", home: "Liverpool", away: "Brighton", homeForm: "WWDWW", awayForm: "WDLWL", goal: 91, over15: 86, over25: 73, btts: 69, confidence: "Yüksek", expectedGoals: 2.7 },
-  { league: "La Liga", date: "2026-08-25", time: "22:00", home: "Barcelona", away: "Villarreal", homeForm: "WWWWW", awayForm: "DWWDL", goal: 88, over15: 84, over25: 71, btts: 66, confidence: "Yüksek", expectedGoals: 2.5 },
-  { league: "Serie A", date: "2026-08-25", time: "21:45", home: "Inter", away: "Atalanta", homeForm: "WWDWW", awayForm: "WDWWW", goal: 86, over15: 81, over25: 68, btts: 72, confidence: "Yüksek", expectedGoals: 2.4 },
-  { league: "Süper Lig", date: "2026-08-25", time: "20:00", home: "Galatasaray", away: "Trabzonspor", homeForm: "WWWWD", awayForm: "WDLWD", goal: 84, over15: 78, over25: 65, btts: 63, confidence: "Orta", expectedGoals: 2.2 },
-];
-
 const navItems = ["Genel Bakış", "Gol Sinyalleri", "Bugünün Maçları", "Ligler"];
 
 function formatDate(value?: string) {
@@ -21,62 +14,84 @@ function formatDate(value?: string) {
   return new Intl.DateTimeFormat("tr-TR", { weekday: "long", day: "2-digit", month: "long", year: "numeric", timeZone: "Europe/Istanbul" }).format(date);
 }
 
+function MatchCard({ match, selected, onSelect }: { match: Match; selected: boolean; onSelect: () => void }) {
+  return <button className={`match-card ${selected ? "selected" : ""}`} onClick={onSelect}>
+    <div className="card-top"><span>{match.country ? `${match.country} • ` : ""}{match.league}</span><span className="match-datetime"><CalendarDays size={13}/>{formatDate(match.date)}</span><span className="match-datetime"><Clock3 size={13}/>{match.time}</span></div>
+    <div className="teams"><div><b>{match.home}</b><small>Form {match.homeForm}</small></div><span>VS</span><div><b>{match.away}</b><small>Form {match.awayForm}</small></div></div>
+    <div className="prob"><div><span>Gol</span><strong>{match.goal}%</strong></div><div><span>1.5 Üst</span><strong>{match.over15}%</strong></div><div><span>2.5 Üst</span><strong>{match.over25}%</strong></div><div><span>KG</span><strong>{match.btts}%</strong></div></div>
+    <div className="bar"><i style={{ width: `${match.goal}%` }} /></div>
+  </button>;
+}
+
 export default function Home() {
   const [active, setActive] = useState("Genel Bakış");
-  const [matches, setMatches] = useState<Match[]>(demoMatches);
-  const [selected, setSelected] = useState<Match>(demoMatches[0]);
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [selected, setSelected] = useState<Match | null>(null);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
-  const [source, setSource] = useState("Demo veri");
+  const [source, setSource] = useState("Canlı veri bekleniyor");
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/matches?limit=8")
+    fetch("/api/matches?limit=10")
       .then((response) => response.json())
       .then((data) => {
         if (cancelled) return;
-        if (Array.isArray(data.matches) && data.matches.length > 0) {
-          const liveMatches = data.matches.map((match: Partial<Match>) => ({ ...match, homeForm: match.homeForm ?? "—", awayForm: match.awayForm ?? "—" })) as Match[];
-          setMatches(liveMatches); setSelected(liveMatches[0]);
-          setSource(data.source === "sportmonks" ? "Sportmonks canlı veri" : "API-Football verisi");
-        } else setSource("Demo veri • API anahtarı bekleniyor");
+        const liveMatches = Array.isArray(data.matches) ? data.matches.map((match: Partial<Match>) => ({ ...match, homeForm: match.homeForm ?? "—", awayForm: match.awayForm ?? "—" })) as Match[] : [];
+        setMatches(liveMatches);
+        setSelected(liveMatches[0] ?? null);
+        setSource(liveMatches.length ? (data.source === "sportmonks" ? "Sportmonks canlı veri" : "API-Football canlı veri") : "Bugün için maç verisi bulunamadı");
       })
-      .catch(() => setSource("Demo veri • bağlantı bekleniyor"))
+      .catch(() => setSource("Canlı veri bağlantısı kurulamadı"))
       .finally(() => setLoading(false));
     return () => { cancelled = true; };
   }, []);
 
-  const filtered = useMemo(() => matches.filter((m) => `${m.home} ${m.away} ${m.league}`.toLowerCase().includes(query.toLowerCase())), [matches, query]);
+  const filtered = useMemo(() => matches.filter((m) => `${m.home} ${m.away} ${m.league} ${m.country ?? ""}`.toLowerCase().includes(query.toLowerCase())), [matches, query]);
+  const top10 = useMemo(() => [...filtered].sort((a, b) => b.goal - a.goal).slice(0, 10), [filtered]);
+  const leagueGroups = useMemo(() => {
+    const groups = new Map<string, Match[]>();
+    [...filtered].sort((a, b) => a.time.localeCompare(b.time)).forEach((match) => {
+      const key = match.league || "Lig bilgisi bekleniyor";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(match);
+    });
+    return [...groups.entries()];
+  }, [filtered]);
 
-  return (
-    <main className="shell">
-      <aside className="sidebar">
-        <div className="brand"><div className="brand-mark">M</div><div><strong>Maç AI</strong><span>Football Intelligence</span></div></div>
-        <div className="nav-label">MENÜ</div>
-        <nav>{navItems.map((item, i) => { const Icon = [Gauge, Goal, CalendarDays, Trophy][i]; return <button key={item} className={active === item ? "nav active" : "nav"} onClick={() => setActive(item)}><span><Icon size={18} /></span>{item}</button>; })}</nav>
-        <div className="sidebar-card"><Sparkles size={18}/><div><b>Maç AI Motoru</b><p>Geçmiş gol ve xG verileriyle olasılık skoru hesaplanıyor.</p></div></div>
-        <div className="sidebar-footer"><ShieldCheck size={15}/> İstatistiksel analiz • Garanti değildir</div>
-      </aside>
-      <section className="content">
-        <header className="topbar"><div><div className="eyebrow">MAÇ AI • BUGÜN</div><h1>{active}</h1></div><div className="search"><Search size={17}/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Maç veya takım ara..." /></div></header>
-        <section className="hero"><div><div className="hero-kicker"><Zap size={16}/> BUGÜNÜN GOL SİNYALLERİ</div><h2>Gol ihtimali en yüksek<br/>maçları keşfet.</h2><p>Maç AI; maç tarihi, başlama saati, form ve gol/xG verilerini istatistiksel modelle birleştirerek olasılık skorları üretir.</p></div><div className="hero-stat"><span>En yüksek gol olasılığı</span><strong>{filtered[0]?.goal ?? 0}%</strong><small>{loading ? "Veriler yükleniyor…" : source}</small></div></section>
-        <div className="section-head"><div><span className="eyebrow">MAÇ LİSTESİ</span><h3>Öne Çıkan Maçlar</h3></div><span className="eyebrow">{loading ? "YÜKLENİYOR" : `${filtered.length} MAÇ`}</span></div>
-        <div className="cards">
-          {filtered.map((m) => <button className={`match-card ${selected.home === m.home && selected.away === m.away ? "selected" : ""}`} key={`${m.home}-${m.away}-${m.id ?? m.time}`} onClick={() => setSelected(m)}>
-            <div className="card-top"><span>{m.league}{m.country ? ` • ${m.country}` : ""}</span><span className="match-datetime"><CalendarDays size={13}/>{formatDate(m.date)}</span><span className="match-datetime"><Clock3 size={13}/>{m.time}</span></div>
-            <div className="teams"><div><b>{m.home}</b><small>Form {m.homeForm}</small></div><span>VS</span><div><b>{m.away}</b><small>Form {m.awayForm}</small></div></div>
-            <div className="prob"><div><span>Gol</span><strong>{m.goal}%</strong></div><div><span>1.5 Üst</span><strong>{m.over15}%</strong></div><div><span>2.5 Üst</span><strong>{m.over25}%</strong></div><div><span>KG</span><strong>{m.btts}%</strong></div></div>
-            <div className="bar"><i style={{ width: `${m.goal}%` }} /></div>
-          </button>)}
-        </div>
-        <section className="analysis">
-          <div className="analysis-head"><div><span className="eyebrow">DETAYLI ANALİZ</span><h3>{selected.home} <em>vs</em> {selected.away}</h3><div className="analysis-datetime"><CalendarDays size={15}/> {formatDate(selected.date)} <span>•</span> <Clock3 size={15}/> {selected.time} <span>•</span> {selected.league}</div><p>{source}</p></div><div className="score"><span>GOL SKORU</span><b>{selected.goal}</b><small>/ 100</small></div></div>
-          <div className="metrics"><Metric label="En az 1 gol" value={selected.goal} /><Metric label="1.5 Üst" value={selected.over15} /><Metric label="2.5 Üst" value={selected.over25} /><Metric label="KG Var" value={selected.btts} /></div>
-          <div className="reason"><CircleHelp size={18}/><div><b>Maç AI neden bu maçı öne çıkarıyor?</b><p>{selected.explanation ?? "Model; gol üretimi, gol yeme ve geçmiş xG verilerini birleştirerek bu maç için olasılık skorları oluşturuyor."} {selected.expectedGoals ? `Beklenen toplam gol: ${selected.expectedGoals}.` : ""}</p></div></div>
-        </section>
+  return <main className="shell">
+    <aside className="sidebar">
+      <div className="brand"><div className="brand-mark">M</div><div><strong>Maç AI</strong><span>Football Intelligence</span></div></div>
+      <div className="nav-label">MENÜ</div>
+      <nav>{navItems.map((item, i) => { const Icon = [Gauge, Goal, CalendarDays, Trophy][i]; return <button key={item} className={active === item ? "nav active" : "nav"} onClick={() => setActive(item)}><span><Icon size={18} /></span>{item}</button>; })}</nav>
+      <div className="sidebar-card"><Sparkles size={18}/><div><b>Maç AI Motoru</b><p>Gerçek fixture, tarih, saat, lig ve gol verileriyle analiz hazırlanıyor.</p></div></div>
+      <div className="sidebar-footer"><ShieldCheck size={15}/> İstatistiksel analiz • Garanti değildir</div>
+    </aside>
+
+    <section className="content">
+      <header className="topbar"><div><div className="eyebrow">MAÇ AI • BUGÜN</div><h1>{active}</h1></div><div className="search"><Search size={17}/><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Maç veya takım ara..." /></div></header>
+      <section className="hero"><div><div className="hero-kicker"><Zap size={16}/> BUGÜNÜN GOL SİNYALLERİ</div><h2>Önce en güçlü 10 maç,<br/>sonra liglere göre liste.</h2><p>Maçlar gerçek tarih ve başlama saatleriyle gösterilir. Maç AI, maçları gol olasılığına göre sıralar ve her ligi ayrı bölümde sunar.</p></div><div className="hero-stat"><span>En yüksek gol olasılığı</span><strong>{top10[0]?.goal ?? 0}%</strong><small>{loading ? "Veriler yükleniyor…" : source}</small></div></section>
+
+      <section className="match-section">
+        <div className="section-head"><div><span className="eyebrow">MAÇ AI SIRALAMASI</span><h3>🔥 Top 10 Maç</h3></div><span className="eyebrow">{top10.length} MAÇ</span></div>
+        <div className="cards">{top10.map((match) => <MatchCard key={`top-${match.id ?? `${match.home}-${match.away}`}`} match={match} selected={selected?.id === match.id} onSelect={() => setSelected(match)} />)}</div>
       </section>
-    </main>
-  );
+
+      <section className="league-list">
+        <div className="section-head"><div><span className="eyebrow">GERÇEK FİKSTÜR</span><h3>Liglere Göre Maçlar</h3></div><span className="eyebrow">{filtered.length} MAÇ</span></div>
+        {leagueGroups.length === 0 && !loading ? <div className="empty-state">Bugün için gösterilecek gerçek maç bulunamadı.</div> : leagueGroups.map(([league, leagueMatches]) => <section className="league-group" key={league}>
+          <div className="league-heading"><div><span className="league-country">{leagueMatches[0]?.country || ""}</span><h4>{league}</h4></div><span>{leagueMatches.length} maç</span></div>
+          <div className="cards">{leagueMatches.map((match) => <MatchCard key={`league-${match.id ?? `${match.home}-${match.away}`}`} match={match} selected={selected?.id === match.id} onSelect={() => setSelected(match)} />)}</div>
+        </section>)}
+      </section>
+
+      {selected && <section className="analysis">
+        <div className="analysis-head"><div><span className="eyebrow">DETAYLI ANALİZ</span><h3>{selected.home} <em>vs</em> {selected.away}</h3><div className="analysis-datetime"><CalendarDays size={15}/> {formatDate(selected.date)} <span>•</span> <Clock3 size={15}/> {selected.time} <span>•</span> {selected.league}</div><p>{source}</p></div><div className="score"><span>GOL SKORU</span><b>{selected.goal}</b><small>/ 100</small></div></div>
+        <div className="metrics"><Metric label="En az 1 gol" value={selected.goal} /><Metric label="1.5 Üst" value={selected.over15} /><Metric label="2.5 Üst" value={selected.over25} /><Metric label="KG Var" value={selected.btts} /></div>
+        <div className="reason"><CircleHelp size={18}/><div><b>Maç AI neden bu maçı öne çıkarıyor?</b><p>{selected.explanation ?? "Model; gol üretimi, gol yeme ve geçmiş xG verilerini birleştirerek bu maç için olasılık skorları oluşturuyor."} {selected.expectedGoals ? `Beklenen toplam gol: ${selected.expectedGoals}.` : ""}</p></div></div>
+      </section>}
+    </section>
+  </main>;
 }
 
 function Metric({ label, value }: { label: string; value: number }) { return <div className="metric"><div className="metric-ring" style={{ "--p": `${value * 3.6}deg` } as React.CSSProperties}><b>{value}%</b></div><span>{label}</span></div>; }
