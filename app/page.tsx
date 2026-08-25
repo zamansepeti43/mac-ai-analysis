@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Activity, BarChart3, CalendarDays, Clock3, Goal, Home, Radio, Search, ShieldCheck, Star, Trophy, Zap } from "lucide-react";
+import { Activity, CalendarDays, Clock3, Goal, Home as HomeIcon, Radio, Search, ShieldCheck, Star, Trophy, Zap } from "lucide-react";
 import LiveMatches from "./components/LiveMatches";
 
 type Match = { id?: number | string; league: string; country?: string; date?: string; time: string; home: string; away: string; homeForm: string; awayForm: string; goal: number; over15: number; over25: number; btts: number; confidence: "Yüksek" | "Orta" | "Düşük"; expectedGoals?: number; explanation?: string };
 
 const navItems = [
-  ["Genel Bakış", Home],
+  ["Genel Bakış", HomeIcon],
   ["Canlı", Radio],
   ["Bugünün Maçları", CalendarDays],
   ["Haftanın Maçları", Trophy],
@@ -54,7 +54,7 @@ export default function Home() {
         const next = Array.isArray(data.matches) ? data.matches.map((match: Partial<Match>) => ({ ...match, homeForm: match.homeForm ?? "—", awayForm: match.awayForm ?? "—" })) as Match[] : [];
         setMatches(next);
         setSelected(next[0] ?? null);
-        setSource(next.length ? (data.source === "sportmonks" ? "Sportmonks • gerçek veri" : data.source === "api-football" ? "API-Football • gerçek veri" : "ESPN • gerçek fikstür") : isWeek ? "Bu hafta için maç bulunamadı" : "Bugün için maç bulunamadı");
+        setSource(next.length ? (data.source === "api-football" ? "API-Football • gerçek veri" : "Gerçek veri") : isWeek ? "Bu hafta için maç bulunamadı" : "Bugün için maç bulunamadı");
       })
       .catch(() => setSource("Gerçek veri bağlantısı kurulamadı"))
       .finally(() => setLoading(false));
@@ -119,7 +119,7 @@ export default function Home() {
         {isWeek ? dateGroups.length === 0 && !loading ? <div className="empty-state"><CalendarDays size={20}/><div><b>Bu hafta için maç bulunamadı</b><span>Gerçek fikstür verisi geldiğinde burada görünecek.</span></div></div> : dateGroups.map(([date, dayMatches]) => <section className="league-group" key={date}><div className="group-heading"><div><span>{formatDate(date)}</span><h4>Günün Maçları</h4></div><b>{dayMatches.length}</b></div><div className="cards">{dayMatches.map((match) => <MatchCard key={`week-${match.id ?? `${match.home}-${match.away}`}`} match={match} selected={selected?.id === match.id} onSelect={() => setSelected(match)} />)}</div></section>) : leagueGroups.length === 0 && !loading ? <div className="empty-state"><Trophy size={20}/><div><b>Bugün için maç bulunamadı</b><span>Veri sağlayıcıdan gerçek fikstür bekleniyor.</span></div></div> : leagueGroups.map(([league, leagueMatches]) => <section className="league-group" key={league}><div className="group-heading"><div><span>{leagueMatches[0]?.country || "Uluslararası"}</span><h4>{league}</h4></div><b>{leagueMatches.length}</b></div><div className="cards">{leagueMatches.map((match) => <MatchCard key={`league-${match.id ?? `${match.home}-${match.away}`}`} match={match} selected={selected?.id === match.id} onSelect={() => setSelected(match)} />)}</div></section>)}
       </section>
 
-      {selected && <section className="analysis-panel"><div className="analysis-top"><div><span className="eyebrow">MAÇ AI ANALİZİ</span><h3>{selected.home} <em>vs</em> {selected.away}</h3><p><CalendarDays size={14}/> {formatDate(selected.date)} <Clock3 size={14}/> {selected.time} <span>•</span> {selected.league}</p></div><div className="ai-score"><span>GOL SKORU</span><b>{selected.goal}</b><small>/100</small></div></div><div className="metrics"><Metric label="En az 1 gol" value={selected.goal}/><Metric label="1.5 Üst" value={selected.over15}/><Metric label="2.5 Üst" value={selected.over25}/><Metric label="KG Var" value={selected.btts}/></div><div className="reason"><Star size={17}/><div><b>AI değerlendirmesi</b><p>{selected.explanation ?? "Model; gol üretimi, gol yeme ve mevcut takım verilerini birleştirerek olasılık skoru oluşturuyor."} {selected.expectedGoals ? `Beklenen toplam gol: ${selected.expectedGoals}.` : ""}</p></div></div></section>}
+      {selected && <section className="analysis-panel"><div className="analysis-top"><div><span className="eyebrow">MAÇ AI ANALİZİ</span><h3>{selected.home} <em>vs</em> {selected.away}</h3><p><CalendarDays size={14}/> {formatDate(selected.date)} <Clock3 size={14}/> {selected.time} <span>•</span> {selected.league}</p></div><div className="ai-score"><span>GOL SKORU</span><b>{selected.goal}</b><small>/100</small></div></div><div className="metrics"><Metric label="En az 1 gol" value={selected.goal}/><Metric label="1.5 Üst" value={selected.over15}/><Metric label="2.5 Üst" value={selected.over25}/><Metric label="KG Var" value={selected.btts}/></div><div className="reason"><Star size={17}/><div><b>AI değerlendirmesi</b><p>{selected.explanation ?? "Model; mevcut maç verilerini istatistiksel olarak birleştirerek olasılık skoru oluşturuyor."} {selected.expectedGoals ? `Beklenen toplam gol: ${selected.expectedGoals}.` : ""}</p></div></div></section>}
     </section>
 
     <nav className="mobile-nav">{navItems.slice(0, 5).map(([label, Icon]) => <button type="button" key={label} className={active === label ? "active" : ""} onClick={() => setActive(label)}><Icon size={19}/><span>{label === "Genel Bakış" ? "Ana Sayfa" : label === "Bugünün Maçları" ? "Bugün" : label === "Haftanın Maçları" ? "Hafta" : label}</span></button>)}</nav>
