@@ -5,8 +5,6 @@ const SPORTMONKS_URL = "https://api.sportmonks.com/v3/football";
 const API_FOOTBALL_URL = "https://v3.football.api-sports.io";
 const ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer";
 
-// ESPN scoreboard'ları ana fikstür kaynağımız değil; Sportmonks/API-Football boş kaldığında
-// önemli ligleri göstermek için anahtarsız bir son çare olarak kullanıyoruz.
 const ESPN_LEAGUES = [
   ["eng.1", "İngiltere", "Premier League"],
   ["tur.1", "Türkiye", "Süper Lig"],
@@ -44,7 +42,7 @@ type SportmonksResponse<T> = { data?: T[]; message?: string; error?: string };
 type ApiResponse<T> = { response?: T[]; errors?: Record<string, unknown> };
 type ApiFootballFixture = { fixture: { id: number; date: string; status: { short: string } }; league: { name: string; country: string }; teams: { home: { id: number; name: string }; away: { id: number; name: string } } };
 type HistoryFixture = { teams: { home: { id: number }; away: { id: number } }; goals: { home: number | null; away: number | null } };
-type EspnEvent = { id: string; date: string; name?: string; competitions?: Array<{ competitors?: Array<{ id?: string; homeAway?: "home" | "away"; team?: { displayName?: string; name?: string } }>; status?: { type?: { state?: string; shortDetail?: string } }> }> };
+type EspnEvent = { id: string; date: string; name?: string; competitions?: Array<{ competitors?: Array<{ id?: string; homeAway?: "home" | "away"; team?: { displayName?: string; name?: string } }>; status?: { type?: { state?: string; shortDetail?: string } } }> };
 type EspnResponse = { events?: EspnEvent[] };
 
 async function sportmonksRequest<T>(path: string, withXg: boolean): Promise<{ data: T[]; error?: string }> {
@@ -58,16 +56,18 @@ async function sportmonksRequest<T>(path: string, withXg: boolean): Promise<{ da
     return { data: json.data ?? [], error: json.data?.length ? undefined : "Sportmonks boş fixture döndürdü" };
   } catch (error) { return { data: [], error: error instanceof Error ? error.message : "Sportmonks bağlantı hatası" }; }
 }
+
 async function sportmonks<T>(path: string) { const rich = await sportmonksRequest<T>(path, true); if (rich.data.length) return rich; const basic = await sportmonksRequest<T>(path, false); return basic.data.length ? basic : { data: [], error: basic.error ?? rich.error }; }
+
 async function apiFootball<T>(path: string): Promise<{ data: T[]; error?: string }> {
   const key = process.env.API_FOOTBALL_KEY;
   if (!key) return { data: [], error: "API_FOOTBALL_KEY tanımlı değil" };
   try { const response = await fetch(`${API_FOOTBALL_URL}${path}`, { headers: { "x-apisports-key": key }, next: { revalidate: 60 } }); const json = (await response.json().catch(() => ({}))) as ApiResponse<T>; if (!response.ok) return { data: [], error: `API-Football ${response.status}` }; return { data: json.response ?? [], error: (json.response?.length ?? 0) ? undefined : "API-Football boş sonuç döndürdü" }; } catch (error) { return { data: [], error: error instanceof Error ? error.message : "API-Football bağlantı hatası" }; }
 }
+
 async function espnScoreboard(league: string, date: string): Promise<{ data: EspnEvent[]; error?: string }> {
   try {
-    // ESPN dates parametresi YYYYMMDD bekler. Buraya YYYY-MM-DD gönderilmesi
-    // fallback katmanının sürekli boş dönmesine neden oluyordu.
+    // ESPN dates parametresi YYYYMMDD bekler.
     const espnDate = date.replaceAll("-", "");
     const response = await fetch(`${ESPN_URL}/${league}/scoreboard?dates=${espnDate}`, { next: { revalidate: 30 } });
     if (!response.ok) return { data: [], error: `ESPN ${response.status}` };
@@ -89,6 +89,7 @@ function turkeyTime(iso: string) { return new Intl.DateTimeFormat("tr-TR", { hou
 function mapSportmonksFixture(fixture: SportmonksFixture) { const { home, away } = participants(fixture); const xg = xgValues(fixture); const xgModel = preMatchFromXg(xg.home, xg.away); return { id: fixture.id, league: fixture.league?.name ?? "Lig bilgisi bekleniyor", country: fixture.league?.country?.name ?? "", date: fixture.starting_at.slice(0, 10), time: turkeyTime(fixture.starting_at), home: home?.name ?? "Ev sahibi", away: away?.name ?? "Deplasman", xgHome: xg.home ?? null, xgAway: xg.away ?? null, ...(xgModel ?? { goal: 50, over15: 50, over25: 50, btts: 50, expectedGoals: undefined, confidence: "Düşük" }) }; }
 
 async function getSportmonksMatches(from: string, to: string, limit: number) { const path = from === to ? `/fixtures/date/${from}?per_page=100` : `/fixtures/between/${from}/${to}?per_page=100`; const result = await sportmonks<SportmonksFixture>(path); const now = Date.now(); const matches = result.data.filter((fixture) => new Date(fixture.starting_at).getTime() >= now - 30 * 60 * 1000).sort((a, b) => new Date(a.starting_at).getTime() - new Date(b.starting_at).getTime()).slice(0, limit).map(mapSportmonksFixture); return { matches, error: result.error }; }
+
 async function getApiFootballMatches(from: string, to: string, limit: number) { const dates: string[] = []; let current = from; while (current <= to) { dates.push(current); current = addDays(current, 1); } const results = await Promise.all(dates.map((date) => apiFootball<ApiFootballFixture>(`/fixtures?date=${date}&timezone=Europe%2FIstanbul`))); const rawFixtures = results.flatMap((result) => result.data); const fixtures = rawFixtures.filter((item) => ["NS", "TBD"].includes(item.fixture.status.short)).slice(0, limit); const matches = await Promise.all(fixtures.map(async (fixture) => { const [homeHistory, awayHistory] = await Promise.all([apiFootball<HistoryFixture>(`/fixtures?team=${fixture.teams.home.id}&last=5`), apiFootball<HistoryFixture>(`/fixtures?team=${fixture.teams.away.id}&last=5`)]); const analysis = analyzeMatch({ home: historyStats(homeHistory.data, fixture.teams.home.id), away: historyStats(awayHistory.data, fixture.teams.away.id) }); return { id: fixture.fixture.id, league: fixture.league.name, country: fixture.league.country, date: fixture.fixture.date.slice(0, 10), time: turkeyTime(fixture.fixture.date), home: fixture.teams.home.name, away: fixture.teams.away.name, ...analysis }; })); return { matches, error: results.find((result) => result.error)?.error }; }
 
 async function getEspnMatches(from: string, to: string, limit: number) {
@@ -104,7 +105,6 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url); const today = todayTurkey(); const requestedDate = searchParams.get("date"); const range = searchParams.get("range") ?? "today"; const from = requestedDate ?? today; const to = range === "week" ? addDays(from, 6) : from; const limit = Math.min(Math.max(Number(searchParams.get("limit") ?? 50), 1), 100); const providerErrors: string[] = [];
   if (process.env.SPORTMONKS_API_TOKEN) { const result = await getSportmonksMatches(from, to, limit); if (result.matches.length) return NextResponse.json({ source: "sportmonks", range, from, to, matches: result.matches }); if (result.error) providerErrors.push(result.error); } else providerErrors.push("SPORTMONKS_API_TOKEN tanımlı değil");
   if (process.env.API_FOOTBALL_KEY) { const result = await getApiFootballMatches(from, to, limit); if (result.matches.length) return NextResponse.json({ source: "api-football", range, from, to, matches: result.matches, fallback: true }); if (result.error) providerErrors.push(result.error); } else providerErrors.push("API_FOOTBALL_KEY tanımlı değil");
-  // Son çare: anahtarsız geniş lig fikstürü. Bu katman sayesinde tek bir ücretli API planına bağımlı kalmayız.
   const espnResult = await getEspnMatches(from, to, limit); if (espnResult.matches.length) return NextResponse.json({ source: "espn", range, from, to, matches: espnResult.matches, fallback: true }); if (espnResult.error) providerErrors.push(espnResult.error);
   return NextResponse.json({ source: "none", range, from, to, matches: [], message: "Veri sağlayıcılardan maç alınamadı.", diagnostics: process.env.NODE_ENV === "production" ? undefined : providerErrors });
 }
