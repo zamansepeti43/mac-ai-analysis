@@ -1,14 +1,82 @@
 import { NextResponse } from "next/server";
 
-const SPORTMONKS_URL = "https://api.sportmonks.com/v3/football";
-type AnyRecord = Record<string, any>;
-type LiveFixture = { id:number; league?:{name?:string;country?:{name?:string}}; participants?:AnyRecord[]; scores?:AnyRecord[]; statistics?:AnyRecord[]; periods?:AnyRecord[] };
+const API_URL = "https://v3.football.api-sports.io";
+type R = Record<string, any>;
 
-function value(stats:AnyRecord[],names:string[],location:string){const row=stats.find(r=>r.location===location&&names.some(n=>`${r.type?.name??""} ${r.type?.developer_name??""} ${r.type?.code??""}`.toLowerCase().includes(n)));const v=row?.data?.value;return typeof v==="number"?v:typeof v==="string"?Number(v.replace("%",""))||0:0;}
-function teams(f:LiveFixture){const p=f.participants??[];return{home:p.find(x=>x.meta?.location==="home")??p[0],away:p.find(x=>x.meta?.location==="away")??p[1]};}
-function score(f:LiveFixture,loc:"home"|"away"){const r=(f.scores??[]).find(x=>x.score?.participant===loc&&(x.description==="CURRENT"||!x.description));return typeof r?.score?.goals==="number"?r.score.goals:0;}
-function minute(f:LiveFixture){const p=f.periods??[];const c=p.find(x=>x.is_current)??p[p.length-1];const n=Number(c?.minutes??c?.minute??0);return Number.isFinite(n)?Math.max(0,Math.min(120,n)):0;}
-function liveModel(s:AnyRecord[],m:number){const shots=value(s,["shots","total shots"],"home")+value(s,["shots","total shots"],"away");const on=value(s,["shots on target","on target"],"home")+value(s,["shots on target","on target"],"away");const corners=value(s,["corners"],"home")+value(s,["corners"],"away");const big=value(s,["big chances"],"home")+value(s,["big chances"],"away");const hp=value(s,["ball possession","possession"],"home"),ap=value(s,["ball possession","possession"],"away");const intensity=Math.min(1.9,.15+shots*.035+on*.11+corners*.018+big*.16+(Math.abs(hp-ap)<18?.08:0));const remaining=Math.max(0,Math.min(60,90-Math.min(90,m)));const probability=Math.max(1,Math.min(99,Math.round((1-Math.exp(-(intensity*remaining/45)))*100)));return{nextGoal:probability,shots,shotsOnTarget:on,corners,bigChances:big,possession:{home:Math.round(hp),away:Math.round(ap)},signal:probability>=65?"Güçlü gol sinyali":probability>=45?"Orta gol sinyali":"Düşük gol sinyali",explanation:`Canlı model ${Math.floor(m)}. dakika verisini değerlendiriyor.`};}
-async function fetchLive(){const token=process.env.SPORTMONKS_API_TOKEN;if(!token)return{data:[],error:"SPORTMONKS_API_TOKEN tanımlı değil"};try{const r=await fetch(`${SPORTMONKS_URL}/livescores/inplay?include=participants;league;scores;events;statistics;periods;xGFixture&per_page=100`,{headers:{Authorization:token},cache:"no-store"});const j=await r.json().catch(()=>({}));if(!r.ok)return{data:[],error:`Sportmonks ${r.status}: ${j.message??"istek başarısız"}`};return{data:(j.data??[]) as LiveFixture[],error:undefined};}catch(e){return{data:[],error:e instanceof Error?e.message:"Sportmonks bağlantı hatası"};}}
-function map(f:LiveFixture){const t=teams(f),m=minute(f);return{id:f.id,league:f.league?.name??"Lig bilgisi bekleniyor",country:f.league?.country?.name??"",home:t.home?.name??"Ev sahibi",away:t.away?.name??"Deplasman",minute:m,status:`${Math.floor(m)}'`,homeScore:score(f,"home"),awayScore:score(f,"away"),...liveModel(f.statistics??[],m)};}
-export async function GET(){const r=await fetchLive();if(r.data.length)return NextResponse.json({source:"sportmonks",updatedAt:new Date().toISOString(),live:r.data.map(map),count:r.data.length});return NextResponse.json({source:"sportmonks",updatedAt:new Date().toISOString(),live:[],count:0,message:r.error??"Sportmonks şu anda canlı maç döndürmedi."});}
+async function api(path: string) {
+  const key = process.env.API_FOOTBALL_KEY;
+  if (!key) throw new Error("API_FOOTBALL_KEY tanımlı değil");
+  const res = await fetch(`${API_URL}${path}`, {
+    headers: { "x-apisports-key": key },
+    cache: "no-store",
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(`API-Football ${res.status}: ${json?.message ?? "istek başarısız"}`);
+  return json;
+}
+
+function num(v: any) { return typeof v === "number" ? v : Number(v) || 0; }
+
+function mapFixture(f: R) {
+  const s = f.score ?? {};
+  const teams = f.teams ?? {};
+  const goals = s.goals ?? {};
+  const status = f.fixture?.status ?? {};
+  return {
+    id: f.fixture?.id,
+    league: f.league?.name ?? "Lig",
+    country: f.league?.country ?? "",
+    home: teams.home?.name ?? "Ev sahibi",
+    away: teams.away?.name ?? "Deplasman",
+    homeLogo: teams.home?.logo ?? null,
+    awayLogo: teams.away?.logo ?? null,
+    minute: num(status.elapsed),
+    status: status.short ?? "LIVE",
+    statusLong: status.long ?? "Canlı",
+    homeScore: num(goals.home),
+    awayScore: num(goals.away),
+    startTime: f.fixture?.date ?? null,
+    timestamp: f.fixture?.timestamp ?? null,
+  };
+}
+
+async function getStats(id: number) {
+  try {
+    const json = await api(`/fixtures/statistics?fixture=${id}`);
+    const rows = json.response ?? [];
+    const find = (team: R, names: string[]) => {
+      const item = (team.statistics ?? []).find((x: R) => names.includes(String(x.type).toLowerCase()));
+      return num(item?.value);
+    };
+    const home = rows[0] ?? {}, away = rows[1] ?? {};
+    const h = home.statistics ?? [], a = away.statistics ?? [];
+    const val = (arr: R[], names: string[]) => num((arr.find(x => names.includes(String(x.type).toLowerCase())))?.value);
+    const shots = val(h,["total shots"]) + val(a,["total shots"]);
+    const on = val(h,["shots on goal"]) + val(a,["shots on goal"]);
+    const corners = val(h,["corner kicks"]) + val(a,["corner kicks"]);
+    const hp = val(h,["ball possession"]), ap = val(a,["ball possession"]);
+    return { shots, shotsOnTarget: on, corners, possession: { home: hp, away: ap } };
+  } catch { return { shots: 0, shotsOnTarget: 0, corners: 0, possession: { home: 0, away: 0 } }; }
+}
+
+function signal(s: R, minute: number) {
+  const intensity = Math.min(2, 0.2 + s.shots * 0.04 + s.shotsOnTarget * 0.12 + s.corners * 0.02);
+  const remaining = Math.max(0, Math.min(60, 90 - minute));
+  const probability = Math.max(1, Math.min(99, Math.round((1 - Math.exp(-(intensity * remaining / 45))) * 100)));
+  return { nextGoal: probability, signal: probability >= 65 ? "Güçlü gol sinyali" : probability >= 45 ? "Orta gol sinyali" : "Düşük gol sinyali" };
+}
+
+export async function GET() {
+  try {
+    const json = await api("/fixtures?live=all");
+    const fixtures = (json.response ?? []) as R[];
+    const live = await Promise.all(fixtures.map(async f => {
+      const base = mapFixture(f);
+      const stats = await getStats(base.id);
+      return { ...base, ...stats, ...signal(stats, base.minute) };
+    }));
+    return NextResponse.json({ source: "api-football", updatedAt: new Date().toISOString(), live, count: live.length });
+  } catch (e) {
+    return NextResponse.json({ source: "api-football", updatedAt: new Date().toISOString(), live: [], count: 0, message: e instanceof Error ? e.message : "API-Football bağlantı hatası" }, { status: 200 });
+  }
+}
