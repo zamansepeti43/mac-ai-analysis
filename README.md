@@ -1,3 +1,5 @@
 # Maç AI
 
-Bu depo AGT Studio ZIP→APK projesi değildir.
+Maç AI, futbol karşılaşmalarını istatistiksel verilerle analiz eden uygulamadır.
+
+**Not:** AGT Studio ZIP→APK Builder için oluşturulan yanlış dal artık kullanılmamalıdır.
